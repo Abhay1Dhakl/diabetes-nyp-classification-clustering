@@ -11,8 +11,10 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.impute import SimpleImputer
 from sklearn.svm import SVC
 import matplotlib.pyplot as plt
 
@@ -45,10 +47,23 @@ def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
     categorical_cols = [c for c in ["Gender"] if c in X.columns]
     numeric_cols = [c for c in X.columns if c not in categorical_cols]
 
+    numeric_pipe = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+        ]
+    )
+    categorical_pipe = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("onehot", OneHotEncoder(handle_unknown="ignore")),
+        ]
+    )
+
     return ColumnTransformer(
         transformers=[
-            ("num", StandardScaler(), numeric_cols),
-            ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_cols),
+            ("num", numeric_pipe, numeric_cols),
+            ("cat", categorical_pipe, categorical_cols),
         ],
         remainder="drop",
     )
@@ -61,6 +76,7 @@ def make_model_candidates(random_state: int) -> dict[str, object]:
             class_weight="balanced",
             random_state=random_state,
         ),
+        "KNN_k7": KNeighborsClassifier(n_neighbors=7),
         "SVM_RBF": SVC(
             kernel="rbf",
             C=1.0,
