@@ -19,6 +19,8 @@ Briefly describe the goal of the project and why it matters clinically.
 - Cross-validation setup
 - Models compared
 - Evaluation metrics (macro‑F1, balanced accuracy)
+- Hyper-parameter tuning (search space + scoring + selection rule)
+- Parameter rationale for any fixed defaults
 
 ## 5. Results
 - Best model (CV):

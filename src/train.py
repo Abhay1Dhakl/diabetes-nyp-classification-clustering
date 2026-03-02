@@ -11,7 +11,13 @@ from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_split
+from sklearn.model_selection import (
+    GridSearchCV,
+    RandomizedSearchCV,
+    StratifiedKFold,
+    cross_validate,
+    train_test_split,
+)
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -103,7 +109,7 @@ def make_model_candidates(random_state: int) -> dict[str, object]:
             class_weight="balanced",
             random_state=random_state,
         ),
-        "KNN_k7": KNeighborsClassifier(n_neighbors=7),
+        "KNN": KNeighborsClassifier(n_neighbors=7),
         "SVM_RBF": SVC(
             kernel="rbf",
             C=1.0,
@@ -117,6 +123,35 @@ def make_model_candidates(random_state: int) -> dict[str, object]:
             random_state=random_state,
             n_jobs=-1,
         ),
+    }
+
+
+def evaluate_pipeline_cv(
+    pipeline: Pipeline,
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    cv: StratifiedKFold,
+) -> dict[str, float]:
+    scores = cross_validate(
+        pipeline,
+        X_train,
+        y_train,
+        cv=cv,
+        scoring={
+            "accuracy": "accuracy",
+            "balanced_accuracy": "balanced_accuracy",
+            "f1_macro": "f1_macro",
+            "f1_weighted": "f1_weighted",
+        },
+        n_jobs=-1,
+        return_train_score=False,
+    )
+
+    return {
+        "accuracy": scores["test_accuracy"].mean(),
+        "balanced_accuracy": scores["test_balanced_accuracy"].mean(),
+        "f1_macro": scores["test_f1_macro"].mean(),
+        "f1_weighted": scores["test_f1_weighted"].mean(),
     }
 
 
@@ -138,34 +173,117 @@ def evaluate_candidates(
             ]
         )
 
-        scores = cross_validate(
-            pipeline,
-            X_train,
-            y_train,
-            cv=cv,
-            scoring={
-                "accuracy": "accuracy",
-                "balanced_accuracy": "balanced_accuracy",
-                "f1_macro": "f1_macro",
-                "f1_weighted": "f1_weighted",
-            },
-            n_jobs=-1,
-            return_train_score=False,
-        )
-
-        rows.append(
-            {
-                "model": name,
-                "accuracy": scores["test_accuracy"].mean(),
-                "balanced_accuracy": scores["test_balanced_accuracy"].mean(),
-                "f1_macro": scores["test_f1_macro"].mean(),
-                "f1_weighted": scores["test_f1_weighted"].mean(),
-            }
-        )
+        metrics = evaluate_pipeline_cv(pipeline, X_train, y_train, cv)
+        metrics["model"] = name
+        rows.append(metrics)
 
     return pd.DataFrame(rows).sort_values(
         by=["f1_macro", "balanced_accuracy"], ascending=False
     )
+
+
+def get_tuning_spaces(random_state: int) -> dict[str, dict[str, object]]:
+    return {
+        "LogReg": {
+            "type": "grid",
+            "params": {
+                "model__C": [0.1, 1.0, 10.0],
+            },
+        },
+        "KNN": {
+            "type": "grid",
+            "params": {
+                "model__n_neighbors": [3, 5, 7, 9, 11],
+                "model__weights": ["uniform", "distance"],
+            },
+        },
+        "SVM_RBF": {
+            "type": "random",
+            "params": {
+                "model__C": np.logspace(-2, 2, 8).tolist(),
+                "model__gamma": ["scale", "auto"],
+            },
+        },
+        "RandomForest": {
+            "type": "random",
+            "params": {
+                "model__n_estimators": [200, 300, 500],
+                "model__max_depth": [None, 5, 10, 20],
+                "model__min_samples_split": [2, 5, 10],
+                "model__min_samples_leaf": [1, 2, 4],
+                "model__max_features": ["sqrt", "log2"],
+            },
+        },
+    }
+
+
+def tune_candidates(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    preprocessor: ColumnTransformer,
+    models: dict[str, object],
+    random_state: int,
+    n_iter: int,
+) -> tuple[pd.DataFrame, dict[str, Pipeline], list[dict[str, object]]]:
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+    spaces = get_tuning_spaces(random_state)
+    rows: list[dict[str, object]] = []
+    tuned_models: dict[str, Pipeline] = {}
+    tuning_details: list[dict[str, object]] = []
+
+    for name, model in models.items():
+        pipeline = Pipeline(
+            steps=[
+                ("preprocess", preprocessor),
+                ("model", model),
+            ]
+        )
+
+        space = spaces[name]
+        if space["type"] == "grid":
+            search = GridSearchCV(
+                pipeline,
+                param_grid=space["params"],
+                cv=cv,
+                scoring="f1_macro",
+                n_jobs=-1,
+            )
+        else:
+            search = RandomizedSearchCV(
+                pipeline,
+                param_distributions=space["params"],
+                n_iter=n_iter,
+                cv=cv,
+                scoring="f1_macro",
+                random_state=random_state,
+                n_jobs=-1,
+            )
+
+        search.fit(X_train, y_train)
+
+        best_pipeline = search.best_estimator_
+        tuned_models[name] = best_pipeline
+
+        metrics = evaluate_pipeline_cv(best_pipeline, X_train, y_train, cv)
+        metrics["model"] = name
+        rows.append(metrics)
+
+        clean_params = {
+            k.replace("model__", ""): v for k, v in search.best_params_.items()
+        }
+        tuning_details.append(
+            {
+                "model": name,
+                "search_type": space["type"],
+                "best_score_f1_macro": search.best_score_,
+                "best_params": clean_params,
+            }
+        )
+
+    results = pd.DataFrame(rows).sort_values(
+        by=["f1_macro", "balanced_accuracy"], ascending=False
+    )
+    return results, tuned_models, tuning_details
 
 
 def plot_confusion_matrix(labels, cm, output_path: Path) -> None:
@@ -196,6 +314,18 @@ def main() -> None:
     parser.add_argument("--reports-dir", type=Path, default=DEFAULT_REPORTS_DIR, help="Output reports directory")
     parser.add_argument("--random-state", type=int, default=42, help="Random seed")
     parser.add_argument("--test-size", type=float, default=0.2, help="Test split size")
+    parser.add_argument(
+        "--tune",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable hyper-parameter tuning before final training",
+    )
+    parser.add_argument(
+        "--tune-n-iter",
+        type=int,
+        default=20,
+        help="RandomizedSearchCV iterations (applies to SVM and RandomForest)",
+    )
     args = parser.parse_args()
 
     df = load_data(args.data)
@@ -213,17 +343,29 @@ def main() -> None:
     preprocessor = build_preprocessor(X_train)
     models = make_model_candidates(args.random_state)
 
-    cv_results = evaluate_candidates(X_train, y_train, preprocessor, models, args.random_state)
-
-    best_name = cv_results.iloc[0]["model"]
-    best_model = models[best_name]
-
-    best_pipeline = Pipeline(
-        steps=[
-            ("preprocess", preprocessor),
-            ("model", best_model),
-        ]
-    )
+    tuning_details = None
+    if args.tune:
+        cv_results, tuned_models, tuning_details = tune_candidates(
+            X_train,
+            y_train,
+            preprocessor,
+            models,
+            args.random_state,
+            args.tune_n_iter,
+        )
+        best_name = cv_results.iloc[0]["model"]
+        best_pipeline = tuned_models[best_name]
+    else:
+        cv_results = evaluate_candidates(
+            X_train, y_train, preprocessor, models, args.random_state
+        )
+        best_name = cv_results.iloc[0]["model"]
+        best_pipeline = Pipeline(
+            steps=[
+                ("preprocess", preprocessor),
+                ("model", models[best_name]),
+            ]
+        )
 
     best_pipeline.fit(X_train, y_train)
     y_pred = best_pipeline.predict(X_test)
@@ -241,10 +383,13 @@ def main() -> None:
     metrics = {
         "best_model": best_name,
         "cv_results": cv_results.to_dict(orient="records"),
+        "tuning": tuning_details,
         "test_report": report,
         "labels": labels,
         "test_size": args.test_size,
         "random_state": args.random_state,
+        "tuned": args.tune,
+        "tune_n_iter": args.tune_n_iter,
     }
 
     metrics_path = args.reports_dir / "metrics.json"
