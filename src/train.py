@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
@@ -14,7 +15,6 @@ from sklearn.model_selection import StratifiedKFold, cross_validate, train_test_
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.impute import SimpleImputer
 from sklearn.svm import SVC
 import matplotlib.pyplot as plt
 
@@ -40,7 +40,36 @@ def load_data(path: Path) -> pd.DataFrame:
     if id_cols:
         df = df.drop(columns=id_cols)
 
+    assert_no_missing(df)
     return df
+
+
+def assert_no_missing(df: pd.DataFrame) -> None:
+    na_counts = df.isna().sum()
+
+    empty_counts = pd.Series(0, index=df.columns, dtype="int64")
+    obj_cols = df.select_dtypes(include="object").columns
+    if len(obj_cols) > 0:
+        empty_counts.loc[obj_cols] = (
+            df[obj_cols].astype(str).apply(lambda s: s.str.strip().eq("")).sum()
+        )
+
+    inf_counts = pd.Series(0, index=df.columns, dtype="int64")
+    num_cols = df.select_dtypes(include="number").columns
+    if len(num_cols) > 0:
+        inf_counts.loc[num_cols] = (
+            df[num_cols].isin([np.inf, -np.inf]).sum()
+        )
+
+    issue_counts = na_counts.add(empty_counts, fill_value=0).add(inf_counts, fill_value=0)
+    if issue_counts.sum() > 0:
+        bad = issue_counts[issue_counts > 0].sort_values(ascending=False)
+        details = ", ".join(f"{col}={int(cnt)}" for col, cnt in bad.items())
+        raise ValueError(
+            "Missing/invalid values detected. "
+            f"Columns with issues: {details}. "
+            "Clean the data or re-enable imputing."
+        )
 
 
 def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
@@ -49,13 +78,11 @@ def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
 
     numeric_pipe = Pipeline(
         steps=[
-            ("imputer", SimpleImputer(strategy="median")),
             ("scaler", StandardScaler()),
         ]
     )
     categorical_pipe = Pipeline(
         steps=[
-            ("imputer", SimpleImputer(strategy="most_frequent")),
             ("onehot", OneHotEncoder(handle_unknown="ignore")),
         ]
     )
