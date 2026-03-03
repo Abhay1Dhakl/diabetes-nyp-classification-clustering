@@ -12,6 +12,13 @@ from sklearn.svm import SVC
 
 
 def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
+    """Build the preprocessing transformer for numeric and categorical columns.
+
+    Args:
+        X: Feature dataframe used to infer column types.
+    Returns:
+        ColumnTransformer with scaling and one-hot encoding.
+    """
     categorical_cols = [c for c in ["Gender"] if c in X.columns]
     numeric_cols = [c for c in X.columns if c not in categorical_cols]
 
@@ -28,6 +35,13 @@ def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
 
 
 def make_model_candidates(random_state: int) -> dict[str, object]:
+    """Create baseline model candidates with sensible defaults.
+
+    Args:
+        random_state: Seed for reproducible estimators.
+    Returns:
+        Mapping of model names to estimator instances.
+    """
     return {
         "LogReg": LogisticRegression(
             max_iter=3000,
@@ -52,6 +66,13 @@ def make_model_candidates(random_state: int) -> dict[str, object]:
 
 
 def get_tuning_spaces(_: int) -> dict[str, dict[str, object]]:
+    """Return hyperparameter search spaces for each model.
+
+    Args:
+        _: Unused random state placeholder.
+    Returns:
+        Mapping of model names to search configurations.
+    """
     return {
         "LogReg": {
             "type": "grid",

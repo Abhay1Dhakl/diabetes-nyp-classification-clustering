@@ -16,9 +16,9 @@ from diabetes_prediction.pipeline_utils import (
     evaluate_models,
     make_ros_factory,
     oversample_available,
-    tune_models,
 )
 from diabetes_prediction.plot_utils import plot_confusion_matrix
+from diabetes_prediction.tuning_utils import tune_models
 
 DEFAULT_DATA = Path("../data/processed/diabetes_clean.csv")
 DEFAULT_MODEL_DIR = Path("models")
@@ -26,6 +26,13 @@ DEFAULT_REPORTS_DIR = Path("reports")
 
 
 def main() -> None:
+    """Train and evaluate diabetes classifiers from the CLI.
+
+    Args:
+        None.
+    Returns:
+        None.
+    """
     parser = argparse.ArgumentParser(description="Train diabetes classification models.")
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA, help="Path to cleaned CSV")
     parser.add_argument("--model-dir", type=Path, default=DEFAULT_MODEL_DIR, help="Output model directory")

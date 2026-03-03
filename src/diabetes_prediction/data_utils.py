@@ -5,6 +5,13 @@ import pandas as pd
 
 
 def load_data(path) -> pd.DataFrame:
+    """Load and sanitize the diabetes dataset.
+
+    Args:
+        path: Path to the cleaned CSV file.
+    Returns:
+        Cleaned dataframe with standardized columns.
+    """
     df = pd.read_csv(path)
     df.columns = df.columns.str.strip()
 
@@ -25,6 +32,13 @@ def load_data(path) -> pd.DataFrame:
 
 
 def assert_no_missing(df: pd.DataFrame) -> None:
+    """Validate that the dataframe has no missing or invalid values.
+
+    Args:
+        df: Input dataframe to validate.
+    Returns:
+        None.
+    """
     na_counts = df.isna().sum()
 
     empty_counts = pd.Series(0, index=df.columns, dtype="int64")

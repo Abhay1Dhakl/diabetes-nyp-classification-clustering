@@ -4,6 +4,15 @@ import matplotlib.pyplot as plt
 
 
 def plot_confusion_matrix(labels, cm, output_path) -> None:
+    """Plot and save a confusion matrix.
+
+    Args:
+        labels: Class labels for axes.
+        cm: Confusion matrix array.
+        output_path: File path for the saved image.
+    Returns:
+        None.
+    """
     fig, ax = plt.subplots(figsize=(5, 4))
     im = ax.imshow(cm, cmap="Blues")
     ax.set_xticks(range(len(labels)))

@@ -11,6 +11,13 @@ DEFAULT_MODEL = Path("models/diabetes_pipeline.joblib")
 
 
 def load_input(path: Path) -> pd.DataFrame:
+    """Load and sanitize input features for prediction.
+
+    Args:
+        path: Path to the input CSV file.
+    Returns:
+        Dataframe of cleaned feature rows.
+    """
     df = pd.read_csv(path)
     df.columns = df.columns.str.strip()
 
@@ -28,6 +35,13 @@ def load_input(path: Path) -> pd.DataFrame:
 
 
 def main() -> None:
+    """Run batch predictions from the CLI.
+
+    Args:
+        None.
+    Returns:
+        None.
+    """
     parser = argparse.ArgumentParser(description="Run predictions using the saved pipeline.")
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL, help="Path to joblib model")
     parser.add_argument("--input", type=Path, required=True, help="CSV file with feature rows")
