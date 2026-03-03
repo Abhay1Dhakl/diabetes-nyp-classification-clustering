@@ -25,7 +25,7 @@ from sklearn.svm import SVC
 import matplotlib.pyplot as plt
 
 
-DEFAULT_DATA = Path("data/processed/diabetes_clean.csv")
+DEFAULT_DATA = Path("../data/processed/diabetes_clean.csv")
 DEFAULT_MODEL_DIR = Path("models")
 DEFAULT_REPORTS_DIR = Path("reports")
 
