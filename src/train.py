@@ -24,6 +24,13 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.svm import SVC
 import matplotlib.pyplot as plt
 
+try:
+    from imblearn.over_sampling import RandomOverSampler
+    from imblearn.pipeline import Pipeline as ImbPipeline
+except Exception:  # pragma: no cover - optional dependency
+    RandomOverSampler = None
+    ImbPipeline = None
+
 
 DEFAULT_DATA = Path("../data/processed/diabetes_clean.csv")
 DEFAULT_MODEL_DIR = Path("models")
@@ -286,6 +293,109 @@ def tune_candidates(
     return results, tuned_models, tuning_details
 
 
+def tune_ros_candidates(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    preprocessor: ColumnTransformer,
+    models: dict[str, object],
+    random_state: int,
+    n_iter: int,
+) -> tuple[pd.DataFrame, dict[str, Pipeline], list[dict[str, object]]]:
+    if RandomOverSampler is None or ImbPipeline is None:
+        raise RuntimeError("imbalanced-learn is required for oversampling tuning")
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+    spaces = get_tuning_spaces(random_state)
+    rows: list[dict[str, object]] = []
+    tuned_models: dict[str, Pipeline] = {}
+    tuning_details: list[dict[str, object]] = []
+
+    for name, model in models.items():
+        pipe = ImbPipeline(
+            steps=[
+                ("preprocess", preprocessor),
+                ("sampler", RandomOverSampler(random_state=random_state)),
+                ("model", model),
+            ]
+        )
+
+        space = spaces[name]
+        if space["type"] == "grid":
+            search = GridSearchCV(
+                pipe,
+                param_grid=space["params"],
+                cv=cv,
+                scoring="f1_macro",
+                n_jobs=-1,
+            )
+        else:
+            search = RandomizedSearchCV(
+                pipe,
+                param_distributions=space["params"],
+                n_iter=n_iter,
+                cv=cv,
+                scoring="f1_macro",
+                random_state=random_state,
+                n_jobs=-1,
+            )
+
+        search.fit(X_train, y_train)
+
+        best_pipeline = search.best_estimator_
+        tuned_models[name] = best_pipeline
+
+        metrics = evaluate_pipeline_cv(best_pipeline, X_train, y_train, cv)
+        metrics["model"] = name
+        rows.append(metrics)
+
+        clean_params = {
+            k.replace("model__", "").replace("sampler__", "sampler_"): v
+            for k, v in search.best_params_.items()
+        }
+        tuning_details.append(
+            {
+                "model": name,
+                "search_type": space["type"],
+                "best_score_f1_macro": search.best_score_,
+                "best_params": clean_params,
+            }
+        )
+
+    results = pd.DataFrame(rows).sort_values(
+        by=["f1_macro", "balanced_accuracy"], ascending=False
+    )
+    return results, tuned_models, tuning_details
+
+
+def evaluate_ros_untuned(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    preprocessor: ColumnTransformer,
+    models: dict[str, object],
+    random_state: int,
+) -> pd.DataFrame:
+    if RandomOverSampler is None or ImbPipeline is None:
+        raise RuntimeError("imbalanced-learn is required for oversampling evaluation")
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+    rows: list[dict[str, object]] = []
+
+    for name, model in models.items():
+        pipe = ImbPipeline(
+            steps=[
+                ("preprocess", preprocessor),
+                ("sampler", RandomOverSampler(random_state=random_state)),
+                ("model", model),
+            ]
+        )
+
+        metrics = evaluate_pipeline_cv(pipe, X_train, y_train, cv)
+        metrics["model"] = name
+        rows.append(metrics)
+
+    return pd.DataFrame(rows).sort_values(by=["f1_macro", "balanced_accuracy"], ascending=False)
+
+
 def plot_confusion_matrix(labels, cm, output_path: Path) -> None:
     fig, ax = plt.subplots(figsize=(5, 4))
     im = ax.imshow(cm, cmap="Blues")
@@ -344,6 +454,11 @@ def main() -> None:
     models = make_model_candidates(args.random_state)
 
     tuning_details = None
+    tuned_models = {}
+    ros_tuned_models = {}
+    ros_tuning_details = None
+
+    # Baseline tuning / evaluation (class-weighted models)
     if args.tune:
         cv_results, tuned_models, tuning_details = tune_candidates(
             X_train,
@@ -353,19 +468,81 @@ def main() -> None:
             args.random_state,
             args.tune_n_iter,
         )
-        best_name = cv_results.iloc[0]["model"]
-        best_pipeline = tuned_models[best_name]
     else:
         cv_results = evaluate_candidates(
             X_train, y_train, preprocessor, models, args.random_state
         )
-        best_name = cv_results.iloc[0]["model"]
-        best_pipeline = Pipeline(
+
+    # Oversampled (untuned) evaluation
+    ros_results_df = pd.DataFrame()
+    ros_tuned_results_df = pd.DataFrame()
+    ros_tuning_details = None
+    if RandomOverSampler is not None and ImbPipeline is not None:
+        try:
+            ros_results_df = evaluate_ros_untuned(
+                X_train, y_train, preprocessor, models, args.random_state
+            )
+        except Exception:
+            ros_results_df = pd.DataFrame()
+
+        # Tune oversampled pipelines
+        if args.tune:
+            try:
+                ros_tuned_results_df, ros_tuned_models, ros_tuning_details = tune_ros_candidates(
+                    X_train,
+                    y_train,
+                    preprocessor,
+                    models,
+                    args.random_state,
+                    args.tune_n_iter,
+                )
+            except Exception:
+                ros_tuned_results_df = pd.DataFrame()
+
+    # Combine candidate result tables and select best by CV f1_macro
+    candidates = []
+    if "cv_results" in locals() and not cv_results.empty:
+        df1 = cv_results.copy()
+        df1["source"] = "tuned" if args.tune else "class_weight"
+        candidates.append(df1)
+    if not ros_results_df.empty:
+        df2 = ros_results_df.copy()
+        df2["source"] = "ros"
+        candidates.append(df2)
+    if not ros_tuned_results_df.empty:
+        df3 = ros_tuned_results_df.copy()
+        df3["source"] = "ros_tuned"
+        candidates.append(df3)
+
+    if len(candidates) == 0:
+        raise RuntimeError("No model results available to choose best model.")
+
+    combined_candidates = pd.concat(candidates, ignore_index=True)
+    combined_candidates = combined_candidates.sort_values("f1_macro", ascending=False)
+    best_row = combined_candidates.iloc[0]
+    best_name = best_row["model"]
+    best_source = best_row["source"]
+
+    # Retrieve the appropriate pipeline
+    if best_source == "tuned":
+        best_pipeline = tuned_models[best_name]
+    elif best_source == "ros_tuned":
+        best_pipeline = ros_tuned_models[best_name]
+    elif best_source == "ros":
+        # construct an untuned oversampled pipeline
+        best_pipeline = ImbPipeline(
             steps=[
                 ("preprocess", preprocessor),
+                ("sampler", RandomOverSampler(random_state=args.random_state)),
                 ("model", models[best_name]),
             ]
         )
+    else:
+        # fallback to class_weight model
+        if best_name == "LogReg":
+            best_pipeline = Pipeline(steps=[("preprocess", preprocessor), ("model", models[best_name])])
+        else:
+            best_pipeline = Pipeline(steps=[("preprocess", preprocessor), ("model", models[best_name])])
 
     best_pipeline.fit(X_train, y_train)
     y_pred = best_pipeline.predict(X_test)
@@ -382,8 +559,11 @@ def main() -> None:
 
     metrics = {
         "best_model": best_name,
-        "cv_results": cv_results.to_dict(orient="records"),
+        "baseline_cv_results": cv_results.to_dict(orient="records") if "cv_results" in locals() and not cv_results.empty else [],
+        "ros_results": ros_results_df.to_dict(orient="records") if not ros_results_df.empty else [],
+        "ros_tuned_results": ros_tuned_results_df.to_dict(orient="records") if not ros_tuned_results_df.empty else [],
         "tuning": tuning_details,
+        "ros_tuning": ros_tuning_details,
         "test_report": report,
         "labels": labels,
         "test_size": args.test_size,
