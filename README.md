@@ -1,5 +1,40 @@
 # diabetes_prediction
 
+## Environment Setup (All Platforms)
+Create a virtual environment and install requirements.
+
+macOS / Linux (bash/zsh):
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Windows (PowerShell):
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Windows (Command Prompt):
+```bat
+python -m venv .venv
+.\.venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+## Quick Start (CLI)
+```bash
+python -m pip install -r requirements.txt
+python src/train.py
+python src/train.py --no-tune
+python src/predict.py --input data/processed/diabetes_clean.csv
+```
+
 ## Notebooks
 - `notebooks/01_eda.ipynb`: Exploratory data analysis on the raw dataset, checks data quality, and saves a cleaned copy.
 - `notebooks/02_preprocessing.ipynb`: Creates the train/test split and scaled arrays used by modeling notebooks.
@@ -41,11 +76,3 @@ These are baseline, not guaranteed “best” parameters. They were chosen for s
 3. `notebooks/03_classification.ipynb`
 4. `notebooks/04_evaluation_error_analysis.ipynb`
 5. `notebooks/05_clustering.ipynb`
-
-## Quick Start (CLI)
-```bash
-python -m pip install -r requirements.txt
-python src/train.py
-python src/train.py --no-tune
-python src/predict.py --input data/processed/diabetes_clean.csv
-```
