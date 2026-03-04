@@ -7,7 +7,8 @@ import joblib
 import pandas as pd
 
 
-DEFAULT_MODEL = Path("models/diabetes_pipeline.joblib")
+ROOT_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_MODEL = ROOT_DIR / "models/diabetes_pipeline.joblib"
 
 
 def load_input(path: Path) -> pd.DataFrame:

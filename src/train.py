@@ -20,9 +20,10 @@ from diabetes_prediction.pipeline_utils import (
 from diabetes_prediction.plot_utils import plot_confusion_matrix
 from diabetes_prediction.tuning_utils import tune_models
 
-DEFAULT_DATA = Path("../data/processed/diabetes_clean.csv")
-DEFAULT_MODEL_DIR = Path("models")
-DEFAULT_REPORTS_DIR = Path("reports")
+ROOT_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_DATA = ROOT_DIR / "data/processed/diabetes_clean.csv"
+DEFAULT_MODEL_DIR = ROOT_DIR / "models"
+DEFAULT_REPORTS_DIR = ROOT_DIR / "reports"
 
 
 def main() -> None:
